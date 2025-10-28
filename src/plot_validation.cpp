@@ -186,45 +186,101 @@ bool VillageGenerator::isValidPlot(const Plot& plot, const std::vector<Plot>& ex
  */
 std::vector<Plot> VillageGenerator::findPlots() {
     std::vector<Plot> plots;
-    int attempts = 0;
     const int MAX_ATTEMPTS = 1000;
     const int MIN_PLOT_SIZE = 14;
     const int MAX_PLOT_SIZE = 20;
     const int MIN_PLOTS = std::max(1, village_size / 50);
     
-    std::uniform_int_distribution<> size_dist(MIN_PLOT_SIZE, MAX_PLOT_SIZE);
-    std::uniform_int_distribution<> x_dist(village_center.x - village_size / 2, 
-                                           village_center.x + village_size / 2);
-    std::uniform_int_distribution<> z_dist(village_center.z - village_size / 2, 
-                                           village_center.z + village_size / 2);
+    int village_min_x = village_center.x - village_size / 2;
+    int village_max_x = village_center.x + village_size / 2;
+    int village_min_z = village_center.z - village_size / 2;
+    int village_max_z = village_center.z + village_size / 2;
     
-    while (attempts < MAX_ATTEMPTS && plots.size() < 100) { // Reasonable upper limit
-        int plot_size = size_dist(rng);
-        int center_x = x_dist(rng);
-        int center_z = z_dist(rng);
-        
-        int origin_x = center_x - plot_size / 2;
-        int origin_z = center_z - plot_size / 2;
-        int bound_x = origin_x + plot_size - 1;
-        int bound_z = origin_z + plot_size - 1;
-        
-        // Get height at plot center
-        mcpp::Coordinate highest = getHighestBlock(center_x, center_z);
-        int height = highest.y;
-        
-        Plot candidate(
-            mcpp::Coordinate(origin_x, height, origin_z),
-            mcpp::Coordinate(bound_x, height, bound_z),
-            mcpp::Coordinate(0, height, 0),
-            height
-        );
-        
-        if (isValidPlot(candidate, plots)) {
-            candidate.entrance = selectEntrance(candidate);
-            plots.push_back(candidate);
+    int plot_size = 0;
+    int center_x = 0;
+    int center_z = 0;
+    
+    if (test_mode) {
+        // --- TEST MODE: Deterministic Grid Scan & Sequential Size ---
+        // Uses a static variable to maintain sequential plot size across valid plots found during the scan
+        static int current_plot_size = MIN_PLOT_SIZE;
+
+        // Iterate through the grid in 5 block increments
+        for (int z = village_min_z + 5; z <= village_max_z - 5; z += 5) {
+            for (int x = village_min_x + 5; x <= village_max_x - 5; x += 5) {
+                
+                center_x = x;
+                center_z = z;
+
+                // Determine plot size sequentially (14-20, wrapping)
+                plot_size = current_plot_size;
+
+                int origin_x = center_x - plot_size / 2;
+                int origin_z = center_z - plot_size / 2;
+                int bound_x = origin_x + plot_size - 1;
+                int bound_z = origin_z + plot_size - 1;
+
+                // Get height at plot center
+                mcpp::Coordinate highest = getHighestBlock(center_x, center_z);
+                int height = highest.y;
+                
+                Plot candidate(
+                    mcpp::Coordinate(origin_x, height, origin_z),
+                    mcpp::Coordinate(bound_x, height, bound_z),
+                    mcpp::Coordinate(0, height, 0),
+                    height
+                );
+
+                if (isValidPlot(candidate, plots)) {
+                    // Update sequential size for the next valid plot
+                    current_plot_size = (current_plot_size == MAX_PLOT_SIZE) ? MIN_PLOT_SIZE : current_plot_size + 1;
+                    
+                    candidate.entrance = selectEntrance(candidate);
+                    plots.push_back(candidate);
+                }
+
+                // Stop after 100 plots (general upper limit)
+                if (plots.size() >= 100) break;
+            }
+            if (plots.size() >= 100) break;
         }
+
+    } else {
+        // --- NORMAL MODE: Random Sampling (Original Logic) ---
+        int attempts = 0;
         
-        attempts++;
+        std::uniform_int_distribution<> size_dist(MIN_PLOT_SIZE, MAX_PLOT_SIZE);
+        std::uniform_int_distribution<> x_dist(village_min_x, village_max_x);
+        std::uniform_int_distribution<> z_dist(village_min_z, village_max_z);
+        
+        while (attempts < MAX_ATTEMPTS && plots.size() < 100) { // Reasonable upper limit
+            plot_size = size_dist(rng);
+            center_x = x_dist(rng);
+            center_z = z_dist(rng);
+            
+            int origin_x = center_x - plot_size / 2;
+            int origin_z = center_z - plot_size / 2;
+            int bound_x = origin_x + plot_size - 1;
+            int bound_z = origin_z + plot_size - 1;
+            
+            // Get height at plot center
+            mcpp::Coordinate highest = getHighestBlock(center_x, center_z);
+            int height = highest.y;
+            
+            Plot candidate(
+                mcpp::Coordinate(origin_x, height, origin_z),
+                mcpp::Coordinate(bound_x, height, bound_z),
+                mcpp::Coordinate(0, height, 0),
+                height
+            );
+            
+            if (isValidPlot(candidate, plots)) {
+                candidate.entrance = selectEntrance(candidate);
+                plots.push_back(candidate);
+            }
+            
+            attempts++;
+        }
     }
     
     if (plots.size() < MIN_PLOTS) {
